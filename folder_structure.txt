@@ -1,0 +1,64 @@
+AI_Assistant/
+├── CLAUDE.md
+├── agents
+│   └── reflection.py
+├── assistant.py
+├── brain
+├── config.json
+├── core
+│   ├── brain.py
+│   ├── config.py
+│   ├── memory.py
+│   └── persona.py
+├── folder_structure.txt
+├── interface
+│   ├── chat
+│   └── gui.py
+├── knowledge_base
+├── memory
+│   ├── backups
+│   │   ├── conversation_20250823_200755.txt
+│   │   └── conversation_20250823_201735.txt
+│   ├── conversation_log.txt
+│   ├── documents
+│   │   ├── hello.txt
+│   │   ├── note_1755902443.txt
+│   │   ├── note_1755902679.txt
+│   │   ├── note_1755903081.txt
+│   │   ├── note_1755903228.txt
+│   │   ├── note_1755903531.txt
+│   │   ├── note_1755903569.txt
+│   │   ├── note_1755903766.txt
+│   │   ├── note_1755903805.txt
+│   │   ├── note_1755903813.txt
+│   │   ├── note_1755903827.txt
+│   │   ├── note_1755903882.txt
+│   │   ├── note_1755903891.txt
+│   │   ├── note_1755904200.txt
+│   │   ├── note_1755904237.txt
+│   │   ├── note_1755904600.txt
+│   │   ├── note_1755904622.txt
+│   │   ├── note_1755904656.txt
+│   │   ├── note_1755904977.txt
+│   │   ├── note_1755971240.txt
+│   │   ├── note_1755971248.txt
+│   │   ├── note_1755971258.txt
+│   │   └── note_1755971273.txt
+│   ├── index
+│   │   ├── default__vector_store.json
+│   │   ├── docstore.json
+│   │   ├── graph_store.json
+│   │   ├── image__vector_store.json
+│   │   └── index_store.json
+│   ├── knowledge
+│   ├── monthly_reports
+│   ├── multi_year_reports
+│   ├── persona.json
+│   └── yearly_reports
+├── rag.py
+├── start_ren.bat
+├── start_renenv.bat
+├── tools
+│   └── voice
+│       └── temp.wav
+└── tree.py
