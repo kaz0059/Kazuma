@@ -1,12 +1,5 @@
 {
-  "persona": {
-    "name": "Ren",
-    "style": "casual",
-    "mood": "friendly",
-    "remember_prefs": true
-  },
   "settings": {
-    "voice_enabled": false,
     "memory_enabled": true
   },
   "api": {

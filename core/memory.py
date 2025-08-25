@@ -1,100 +1,106 @@
+# core/memory.py
+
 import json
 import os
 import shutil
 from datetime import datetime
-from typing import List, Tuple, Optional
+from typing import List, Dict, Optional, Union
 
 
 class Memory:
     """
-    File-based memory:
-      - conversation log at memory/conversation_log.txt
-      - backups to memory/backups/
-      - persona prefs at memory/persona.json
-      - documents dir stays as-is for your notes
+    Unified file-based memory system:
+    - Conversation log at memory/conversation_log.txt
+    - Automatic backups to memory/backups/
+    - Support for both tuple and message formats
     """
 
-    def __init__(self, base_dir: str = "memory", enable: bool = True):
-        self.enabled = enable
+    def __init__(self, base_dir: str = "memory", enabled: bool = True):
+        self.enabled = enabled
         self.base_dir = base_dir
         self.log_path = os.path.join(base_dir, "conversation_log.txt")
         self.backup_dir = os.path.join(base_dir, "backups")
-        self.persona_path = os.path.join(base_dir, "persona.json")
 
-        if not os.path.isdir(self.base_dir):
-            os.makedirs(self.base_dir, exist_ok=True)
-        if not os.path.isdir(self.backup_dir):
-            os.makedirs(self.backup_dir, exist_ok=True)
+        # Create directories if they don't exist
+        for dir_path in [self.base_dir, self.backup_dir]:
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path, exist_ok=True)
 
-        # lazily create log file
+        # Create empty log file if it doesn't exist
         if not os.path.exists(self.log_path):
             with open(self.log_path, "w", encoding="utf-8") as f:
                 f.write("")
 
-    # -------------- Persona persistence --------------
-    def load_persona(self) -> Optional[dict]:
-        if not self.enabled:
-            return None
-        try:
-            with open(self.persona_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except FileNotFoundError:
-            return None
-        except Exception:
-            return None
-
-    def save_persona(self, persona_dict: dict):
-        if not self.enabled:
-            return
-        with open(self.persona_path, "w", encoding="utf-8") as f:
-            json.dump(persona_dict, f, ensure_ascii=False, indent=2)
-
-    # -------------- Conversation logging --------------
     def append_message(self, role: str, text: str, ts: Optional[str] = None, user_id: Optional[str] = None):
+        """Append a message to the conversation log."""
         if not self.enabled:
             return
-        ts = ts or (datetime.utcnow().isoformat() + "Z")
-        safe_text = text.replace("\n", "\\n")
-        line = f"{ts}\t{role}\t{user_id or ''}\t{safe_text}\n"
-        with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write(line)
-
-    def _parse_line(self, line: str) -> Optional[Tuple[str, str]]:
-        # returns (user_text, bot_text) pairs is handled at higher-level
+        
+        timestamp = ts or (datetime.utcnow().isoformat() + "Z")
+        # Escape tabs and newlines to prevent parsing issues
+        safe_text = text.replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
+        line = f"{timestamp}\t{role}\t{user_id or ''}\t{safe_text}\n"
+        
         try:
-            parts = line.rstrip("\n").split("\t")
-            # ts, role, user_id, text
+            with open(self.log_path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception as e:
+            print(f"⚠️ Failed to write to memory: {e}")
+
+    def _parse_line(self, line: str) -> Optional[Dict[str, str]]:
+        """Parse a log line into a message dictionary."""
+        try:
+            line = line.rstrip("\n\r")
+            if not line:
+                return None
+                
+            parts = line.split("\t")
             if len(parts) >= 4:
-                role, text = parts[1], parts[3].replace("\\n", "\n")
-                return role, text
-        except Exception:
-            pass
+                timestamp, role, user_id, text = parts[0], parts[1], parts[2], parts[3]
+                # Unescape text
+                text = text.replace("\\t", "\t").replace("\\n", "\n").replace("\\r", "\r")
+                
+                return {
+                    "timestamp": timestamp,
+                    "role": role,
+                    "user_id": user_id,
+                    "text": text
+                }
+        except Exception as e:
+            print(f"⚠️ Error parsing log line: {e}")
+        
         return None
 
-    def load_history_pairs(self, max_messages: Optional[int] = None) -> List[Tuple[str, str]]:
+    def load_history_pairs(self, max_messages: Optional[int] = None) -> List[tuple]:
         """
-        Returns a list of (user, assistant) tuples for Gradio Chatbot.
-        We pair messages in order; if odd count, trailing user message stays unpaired.
+        Load conversation history as (user, assistant) tuple pairs.
+        Compatible with basic Gradio Chatbot.
         """
         if not self.enabled or not os.path.exists(self.log_path):
             return []
 
-        roles_and_texts = []
-        with open(self.log_path, "r", encoding="utf-8") as f:
-            for line in f:
-                parsed = self._parse_line(line)
-                if parsed:
-                    roles_and_texts.append(parsed)
+        messages = []
+        try:
+            with open(self.log_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    parsed = self._parse_line(line)
+                    if parsed:
+                        messages.append((parsed["role"], parsed["text"]))
+        except Exception as e:
+            print(f"⚠️ Error loading history: {e}")
+            return []
 
-        # optionally only take last N role entries
-        if max_messages is not None and max_messages > 0:
-            roles_and_texts = roles_and_texts[-max_messages:]
+        # Apply message limit if specified
+        if max_messages and max_messages > 0:
+            messages = messages[-max_messages:]
 
-        pairs: List[Tuple[str, str]] = []
+        # Convert to (user, assistant) pairs
+        pairs = []
         buffer_user = None
-        for role, text in roles_and_texts:
+        
+        for role, text in messages:
             if role == "user":
-                # if a previous user message was unpaired, push it with empty assistant
+                # If there's a previous unpaired user message, pair it with empty response
                 if buffer_user is not None:
                     pairs.append((buffer_user, ""))
                 buffer_user = text
@@ -103,26 +109,91 @@ class Memory:
                     pairs.append((buffer_user, text))
                     buffer_user = None
                 else:
-                    # assistant without preceding user; show as system line
+                    # Assistant message without user message
                     pairs.append(("", text))
 
-        # if leftover user msg
+        # Handle leftover user message
         if buffer_user is not None:
             pairs.append((buffer_user, ""))
 
         return pairs
 
+    def load_history_messages(self, max_messages: Optional[int] = None) -> List[Dict[str, str]]:
+        """
+        Load conversation history as message dictionaries.
+        Compatible with modern Gradio Chatbot (type='messages').
+        """
+        if not self.enabled or not os.path.exists(self.log_path):
+            return []
+
+        messages = []
+        try:
+            with open(self.log_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    parsed = self._parse_line(line)
+                    if parsed and parsed["role"] in ["user", "assistant"]:
+                        messages.append({
+                            "role": parsed["role"],
+                            "content": parsed["text"]
+                        })
+        except Exception as e:
+            print(f"⚠️ Error loading history: {e}")
+            return []
+
+        # Apply message limit if specified
+        if max_messages and max_messages > 0:
+            messages = messages[-max_messages:]
+
+        return messages
+
     def backup_log(self) -> Optional[str]:
-        """Copy current log to backups with timestamp and clear it."""
-        if not self.enabled:
+        """Create a backup of the current log and clear it."""
+        if not self.enabled or not os.path.exists(self.log_path):
             return None
-        if not os.path.exists(self.log_path):
+
+        try:
+            # Check if log has content
+            if os.path.getsize(self.log_path) == 0:
+                return None
+
+            # Create backup with timestamp
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            backup_name = f"conversation_{timestamp}.txt"
+            backup_path = os.path.join(self.backup_dir, backup_name)
+            
+            shutil.copy2(self.log_path, backup_path)
+            
+            # Clear current log
+            with open(self.log_path, "w", encoding="utf-8") as f:
+                f.write("")
+            
+            print(f"📁 Conversation backed up to {backup_path}")
+            return backup_path
+            
+        except Exception as e:
+            print(f"❌ Backup failed: {e}")
             return None
-        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        backup_name = f"conversation_{ts}.txt"
-        backup_path = os.path.join(self.backup_dir, backup_name)
-        shutil.copy2(self.log_path, backup_path)
-        # clear current
-        with open(self.log_path, "w", encoding="utf-8") as f:
-            f.write("")
-        return backup_path
+
+    def get_stats(self) -> Dict[str, Union[int, str]]:
+        """Get memory statistics."""
+        if not self.enabled or not os.path.exists(self.log_path):
+            return {"total_messages": 0, "size": "0 bytes"}
+
+        try:
+            messages = self.load_history_messages()
+            size = os.path.getsize(self.log_path)
+            
+            # Format size nicely
+            if size < 1024:
+                size_str = f"{size} bytes"
+            elif size < 1024 * 1024:
+                size_str = f"{size / 1024:.1f} KB"
+            else:
+                size_str = f"{size / (1024 * 1024):.1f} MB"
+
+            return {
+                "total_messages": len(messages),
+                "size": size_str
+            }
+        except Exception:
+            return {"total_messages": 0, "size": "unknown"}

@@ -1,13 +1,13 @@
-# smart_brain.py
+# core/brain.py
 
 from datetime import datetime
 from typing import Optional
-import re
+import os
 
 
 class SmartBrain:
     """
-    Brain that automatically detects what kind of response you want
+    Unified smart brain that automatically detects response style
     """
 
     def __init__(self, config: dict, memory, llm):
@@ -15,92 +15,103 @@ class SmartBrain:
         self.memory = memory
         self.llm = llm
         
-        # Load knowledge base if you want RAG
+        # Load knowledge base if available
+        self.db = None
+        self.query_kb = lambda db, q: ""
+        
         try:
-            from rag import build_knowledge_base, query_knowledge_base
+            from core.rag import build_knowledge_base, query_knowledge_base
+            print("🔍 Loading knowledge base...")
             self.db = build_knowledge_base()
             self.query_kb = query_knowledge_base
-        except ImportError:
-            self.db = None
-            self.query_kb = lambda db, q: ""
+            
+            if self.db:
+                print("✅ Knowledge base loaded successfully!")
+            else:
+                print("ℹ️ No documents found in knowledge_base/")
+        except Exception as e:
+            print(f"ℹ️ RAG system not available: {e}")
 
     def detect_response_style(self, user_text: str) -> dict:
-        """
-        Automatically detect what kind of response the user wants
-        """
+        """Auto-detect what kind of response the user wants"""
         text_lower = user_text.lower()
         
-        # Detect length preference
-        if any(word in text_lower for word in ["briefly", "short", "quickly", "tldr", "summary"]):
+        # Length detection
+        if any(word in text_lower for word in [
+            "briefly", "short", "quickly", "tldr", "summary", "concise"
+        ]):
             length = "short"
-        elif any(word in text_lower for word in ["detailed", "explain", "elaborate", "comprehensive", "in depth"]):
+        elif any(word in text_lower for word in [
+            "detailed", "explain", "elaborate", "comprehensive", "in depth", "thorough"
+        ]):
             length = "detailed"
         else:
             length = "medium"
         
-        # Detect formality
-        if any(word in text_lower for word in ["hey", "yo", "sup", "what's up"]):
+        # Tone detection
+        if any(word in text_lower for word in [
+            "hey", "yo", "sup", "what's up", "hi there"
+        ]):
             tone = "casual"
-        elif any(word in text_lower for word in ["please", "could you", "would you kindly"]):
+        elif any(word in text_lower for word in [
+            "please", "could you", "would you kindly", "thank you"
+        ]):
             tone = "formal"
         else:
             tone = "neutral"
         
-        # Detect information type
-        if any(word in text_lower for word in ["how", "tutorial", "guide", "step", "explain"]):
+        # Information type detection
+        if any(word in text_lower for word in [
+            "how to", "tutorial", "guide", "step", "process", "instructions"
+        ]):
             info_type = "instructional"
-        elif any(word in text_lower for word in ["what is", "define", "meaning"]):
+        elif any(word in text_lower for word in [
+            "what is", "define", "meaning", "definition", "explain"
+        ]):
             info_type = "definitional"
-        elif any(word in text_lower for word in ["code", "program", "script", "function"]):
+        elif any(word in text_lower for word in [
+            "code", "program", "script", "function", "example", "python", "javascript"
+        ]):
             info_type = "code"
-        elif "?" in user_text:
-            info_type = "qa"
         else:
             info_type = "conversational"
-        
-        # Detect urgency/importance
-        if any(word in text_lower for word in ["urgent", "asap", "quickly", "fast"]):
-            urgency = "high"
-        else:
-            urgency = "normal"
         
         return {
             "length": length,
             "tone": tone,
-            "info_type": info_type,
-            "urgency": urgency
+            "info_type": info_type
         }
 
     def build_smart_prompt(self, user_text: str, context: str, style: dict) -> str:
-        """
-        Build a prompt that tells the AI exactly how to respond
-        """
-        # Base instruction
+        """Build prompt based on detected style"""
         base = "You are a helpful AI assistant. "
         
-        # Add style instructions
+        # Length instructions
         if style["length"] == "short":
-            base += "Give a brief, concise answer. "
+            base += "Give a brief, concise answer. Keep it short and to the point. "
         elif style["length"] == "detailed":
-            base += "Provide a comprehensive, detailed explanation. "
+            base += "Provide a comprehensive, detailed explanation with examples where helpful. "
+        else:
+            base += "Give a balanced, informative response. "
         
+        # Tone instructions
         if style["tone"] == "casual":
-            base += "Be casual and friendly. "
+            base += "Be casual, friendly, and conversational. "
         elif style["tone"] == "formal":
-            base += "Be professional and formal. "
+            base += "Be professional, formal, and polite. "
+        else:
+            base += "Maintain a helpful and neutral tone. "
         
+        # Information type instructions
         if style["info_type"] == "instructional":
-            base += "Focus on step-by-step guidance. "
+            base += "Focus on clear, step-by-step guidance and practical instructions. "
         elif style["info_type"] == "code":
-            base += "Provide practical code examples when relevant. "
+            base += "Provide practical code examples with clear explanations. "
         elif style["info_type"] == "definitional":
-            base += "Give clear definitions and explanations. "
-        
-        if style["urgency"] == "high":
-            base += "Get straight to the point. "
+            base += "Give clear definitions and explanations of concepts. "
         
         # Add context if available
-        context_part = f"\nUse this context if relevant: {context}\n" if context else ""
+        context_part = f"\nUse this context if relevant:\n{context}\n" if context else ""
         
         return f"""{base}
 
@@ -109,23 +120,30 @@ User: {user_text}
 Assistant:"""
 
     def think(self, user_text: str, user_id: Optional[str] = "user") -> str:
-        # Auto-detect what kind of response they want
+        """Generate smart response based on auto-detected style"""
+        # Auto-detect response style
         style = self.detect_response_style(user_text)
         
-        # Get context from knowledge base
+        # Get RAG context if available
         context = ""
         if self.db:
-            context = self.query_kb(self.db, user_text)
+            try:
+                context = self.query_kb(self.db, user_text)
+            except Exception as e:
+                print(f"⚠️ RAG query error: {e}")
         
         # Build smart prompt
         prompt = self.build_smart_prompt(user_text, context, style)
         
         # Generate response
-        reply = self.llm.invoke(prompt)
+        try:
+            reply = self.llm.invoke(prompt)
+        except Exception as e:
+            reply = f"I encountered an error connecting to the AI model: {str(e)}\nPlease make sure Ollama is running and the model is available."
         
         # Save to memory
-        timestamp = datetime.utcnow().isoformat() + "Z"
-        if self.memory.enabled:
+        if self.memory and self.memory.enabled:
+            timestamp = datetime.utcnow().isoformat() + "Z"
             self.memory.append_message(role="user", text=user_text, ts=timestamp, user_id=user_id)
             self.memory.append_message(role="assistant", text=reply, ts=timestamp, user_id="assistant")
         
